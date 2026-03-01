@@ -1,21 +1,26 @@
 import React, { useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator } from 'react-native';
-import { signInWithEmailAndPassword } from 'firebase/auth';
+import { createUserWithEmailAndPassword } from 'firebase/auth';
 import { auth } from '../firebaseConfig';
 
-export default function LoginScreen({ onSwitch }: { onSwitch: () => void }) {
+export default function SignUpScreen({ onSwitch }: { onSwitch: () => void }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [confirm, setConfirm] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
-  const handleLogin = async () => {
+  const handleSignUp = async () => {
+    if (password !== confirm) {
+      setError('Passwords do not match.');
+      return;
+    }
     setLoading(true);
     setError('');
     try {
-      await signInWithEmailAndPassword(auth, email, password);
+      await createUserWithEmailAndPassword(auth, email, password);
     } catch (err: any) {
-      setError('Invalid email or password. Please try again.');
+      setError('Could not create account. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -24,7 +29,7 @@ export default function LoginScreen({ onSwitch }: { onSwitch: () => void }) {
   return (
     <View style={styles.container}>
       <Text style={styles.title}>PsychGraphs</Text>
-      <Text style={styles.subtitle}>Sign in to your account</Text>
+      <Text style={styles.subtitle}>Create your account</Text>
 
       <TextInput
         style={styles.input}
@@ -45,14 +50,23 @@ export default function LoginScreen({ onSwitch }: { onSwitch: () => void }) {
         secureTextEntry
       />
 
+      <TextInput
+        style={styles.input}
+        placeholder="Confirm Password"
+        placeholderTextColor="#666"
+        value={confirm}
+        onChangeText={setConfirm}
+        secureTextEntry
+      />
+
       {error ? <Text style={styles.error}>{error}</Text> : null}
 
-      <TouchableOpacity style={styles.button} onPress={handleLogin} disabled={loading}>
-        {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>Sign In</Text>}
+      <TouchableOpacity style={styles.button} onPress={handleSignUp} disabled={loading}>
+        {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>Create Account</Text>}
       </TouchableOpacity>
 
       <TouchableOpacity onPress={onSwitch} style={styles.switchButton}>
-        <Text style={styles.switchText}>Don't have an account? Sign Up</Text>
+        <Text style={styles.switchText}>Already have an account? Sign In</Text>
       </TouchableOpacity>
     </View>
   );
