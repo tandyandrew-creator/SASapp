@@ -29,7 +29,7 @@ export default function LoginScreen({ onSwitch }: { onSwitch: () => void }) {
       <TextInput
         style={styles.input}
         placeholder="Email"
-        placeholderTextColor="#666"
+        placeholderTextColor="#9CA3AF"
         value={email}
         onChangeText={setEmail}
         autoCapitalize="none"
@@ -39,7 +39,7 @@ export default function LoginScreen({ onSwitch }: { onSwitch: () => void }) {
       <TextInput
         style={styles.input}
         placeholder="Password"
-        placeholderTextColor="#666"
+        placeholderTextColor="#9CA3AF"
         value={password}
         onChangeText={setPassword}
         secureTextEntry
@@ -61,40 +61,40 @@ export default function LoginScreen({ onSwitch }: { onSwitch: () => void }) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0f1923',
+    backgroundColor: '#F8F9FB',
     justifyContent: 'center',
     paddingHorizontal: 32,
   },
   title: {
     fontSize: 36,
     fontWeight: 'bold',
-    color: '#ffffff',
+    color: '#1A1D23',
     marginBottom: 8,
   },
   subtitle: {
     fontSize: 16,
-    color: '#8899aa',
+    color: '#6B7280',
     marginBottom: 48,
   },
   input: {
-    backgroundColor: '#1c2b3a',
-    color: '#ffffff',
+    backgroundColor: '#FFFFFF',
+    color: '#1A1D23',
     borderRadius: 8,
     padding: 16,
     marginBottom: 16,
     fontSize: 16,
     borderWidth: 1,
-    borderColor: '#2a3f52',
+    borderColor: '#E5E8EE',
   },
   button: {
-    backgroundColor: '#2563eb',
+    backgroundColor: '#3B6FEB',
     borderRadius: 8,
     padding: 16,
     alignItems: 'center',
     marginTop: 8,
   },
   buttonText: {
-    color: '#ffffff',
+    color: '#FFFFFF',
     fontSize: 16,
     fontWeight: '600',
   },
@@ -108,7 +108,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   switchText: {
-    color: '#8899aa',
+    color: '#6B7280',
     fontSize: 14,
   },
 });

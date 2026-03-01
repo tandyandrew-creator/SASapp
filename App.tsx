@@ -3,20 +3,27 @@ import { onAuthStateChanged, User } from 'firebase/auth';
 import { auth } from './firebaseConfig';
 import LoginScreen from './screens/LoginScreen';
 import SignUpScreen from './screens/SignUpScreen';
+import DashboardScreen from './screens/DashboardScreen';
 
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [showSignUp, setShowSignUp] = useState(false);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
-      setUser(user);
+    const unsubscribe = onAuthStateChanged(auth, (resolvedUser) => {
+      setUser(resolvedUser);
+      setLoading(false);
     });
     return unsubscribe;
   }, []);
 
+  if (loading) {
+    return null;
+  }
+
   if (user) {
-    return null; // We'll replace this with the main app screen soon
+    return <DashboardScreen />;
   }
 
   if (showSignUp) {
