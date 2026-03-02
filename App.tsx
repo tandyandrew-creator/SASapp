@@ -4,11 +4,15 @@ import { auth } from './firebaseConfig';
 import LoginScreen from './screens/LoginScreen';
 import SignUpScreen from './screens/SignUpScreen';
 import DashboardScreen from './screens/DashboardScreen';
+import DueDateCalculatorScreen from './screens/DueDateCalculatorScreen';
+
+type AppScreen = 'dashboard' | 'dueDateCalculator';
 
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [showSignUp, setShowSignUp] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [appScreen, setAppScreen] = useState<AppScreen>('dashboard');
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (resolvedUser) => {
@@ -23,7 +27,10 @@ export default function App() {
   }
 
   if (user) {
-    return <DashboardScreen />;
+    if (appScreen === 'dueDateCalculator') {
+      return <DueDateCalculatorScreen onBack={() => setAppScreen('dashboard')} />;
+    }
+    return <DashboardScreen onNavigate={(screen) => setAppScreen(screen)} />;
   }
 
   if (showSignUp) {

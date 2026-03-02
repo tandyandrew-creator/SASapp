@@ -6,6 +6,7 @@ import {
   TouchableOpacity,
   StyleSheet,
   FlatList,
+  ScrollView,
   SafeAreaView,
   StatusBar,
   Modal,
@@ -59,7 +60,11 @@ interface AddForm {
 
 const EMPTY_FORM: AddForm = { firstName: '', lastName: '', studentId: '', notes: '' };
 
-export default function DashboardScreen() {
+interface Props {
+  onNavigate: (screen: 'dueDateCalculator') => void;
+}
+
+export default function DashboardScreen({ onNavigate }: Props) {
   const [students, setStudents] = useState<Student[]>([]);
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
@@ -212,6 +217,19 @@ export default function DashboardScreen() {
           <Text style={styles.statValue}>0</Text>
           <Text style={styles.statLabel}>This Month</Text>
         </View>
+      </View>
+
+      {/* Tools */}
+      <View style={styles.toolsWrap}>
+        <Text style={styles.toolsSectionLabel}>Tools</Text>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.toolsRow}>
+          <TouchableOpacity style={styles.toolCard} onPress={() => onNavigate('dueDateCalculator')}>
+            <View style={styles.toolIconWrap}>
+              <Text style={styles.toolIconText}>~</Text>
+            </View>
+            <Text style={styles.toolCardLabel}>Due Date{'\n'}Calculator</Text>
+          </TouchableOpacity>
+        </ScrollView>
       </View>
 
       {/* Search */}
@@ -583,5 +601,52 @@ const styles = StyleSheet.create({
     color: PALETTE.white,
     fontSize: 15,
     fontWeight: '600',
+  },
+  // Tools section
+  toolsWrap: {
+    paddingTop: 16,
+    paddingBottom: 4,
+  },
+  toolsSectionLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: PALETTE.muted,
+    letterSpacing: 0.2,
+    paddingHorizontal: 16,
+    marginBottom: 8,
+  },
+  toolsRow: {
+    paddingHorizontal: 16,
+    gap: 12,
+  },
+  toolCard: {
+    backgroundColor: PALETTE.white,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: PALETTE.border,
+    padding: 14,
+    alignItems: 'center',
+    width: 100,
+  },
+  toolIconWrap: {
+    width: 40,
+    height: 40,
+    borderRadius: 10,
+    backgroundColor: PALETTE.accentLight,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 8,
+  },
+  toolIconText: {
+    fontSize: 20,
+    color: PALETTE.accent,
+    fontWeight: '700',
+  },
+  toolCardLabel: {
+    fontSize: 11,
+    color: PALETTE.text,
+    fontWeight: '600',
+    textAlign: 'center',
+    lineHeight: 15,
   },
 });
