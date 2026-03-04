@@ -23,6 +23,8 @@ import {
   addDoc,
   deleteDoc,
   doc,
+  getDoc,
+  getDocs,
   serverTimestamp,
   Timestamp,
 } from 'firebase/firestore';
@@ -39,6 +41,7 @@ const PALETTE = {
   muted: '#6B7280',
   placeholder: '#9CA3AF',
   error: '#EF4444',
+  rowAlt: '#FAFBFC',
 };
 
 interface Student {
@@ -61,17 +64,59 @@ interface AddForm {
 const EMPTY_FORM: AddForm = { firstName: '', lastName: '', studentId: '', notes: '' };
 
 interface Props {
-  onNavigate: (screen: 'dueDateCalculator') => void;
+  onNavigate: (screen: 'dueDateCalculator' | 'scoreConverter' | 'bellCurveGraph') => void;
+  onSelectStudent: (student: { id: string; firstName: string; lastName: string; studentId?: string }) => void;
 }
 
-export default function DashboardScreen({ onNavigate }: Props) {
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+function formatTimestamp(ts: Timestamp | null): string {
+  if (!ts) return '—';
+  const d = ts.toDate();
+  return `${MONTHS[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}`;
+}
+
+const TOOLS = [
+  {
+    key: 'dueDateCalculator' as const,
+    icon: '📅',
+    title: 'Due Date\nCalculator',
+    desc: 'Calculate assessment deadlines',
+  },
+  {
+    key: 'scoreConverter' as const,
+    icon: '🔢',
+    title: 'Score\nConverter',
+    desc: 'Convert between score types',
+  },
+  {
+    key: 'bellCurveGraph' as const,
+    icon: '📊',
+    title: 'Quick Bell\nCurve',
+    desc: 'Visualize scores instantly',
+  },
+];
+
+export default function DashboardScreen({ onNavigate, onSelectStudent }: Props) {
   const [students, setStudents] = useState<Student[]>([]);
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
   const [modalVisible, setModalVisible] = useState(false);
   const [form, setForm] = useState<AddForm>(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
+  const [evalTypesMap, setEvalTypesMap] = useState<Record<string, string>>({});
+  const [firstName, setFirstName] = useState('');
 
+  // Fetch current user's first name
+  useEffect(() => {
+    const uid = auth.currentUser?.uid;
+    if (!uid) return;
+    getDoc(doc(db, 'users', uid)).then(snap => {
+      if (snap.exists()) setFirstName(snap.data().firstName ?? '');
+    });
+  }, []);
+
+  // Load students
   useEffect(() => {
     const uid = auth.currentUser?.uid;
     if (!uid) { setLoading(false); return; }
@@ -84,9 +129,16 @@ export default function DashboardScreen({ onNavigate }: Props) {
     const unsub = onSnapshot(
       q,
       (snap) => {
+        console.log('=== SNAPSHOT: received ===');
+        console.log('Querying for userId:', uid);
+        console.log('Document count:', snap.docs.length);
+        snap.docs.forEach((d, i) => {
+          const data = d.data();
+          console.log(`  doc[${i}] id=${d.id} firstName=${data.firstName} lastName=${data.lastName} userId=${data.userId} createdAt=${data.createdAt?.seconds ?? 'null (pending)'}`);
+        });
         const list = snap.docs
           .map(d => ({ id: d.id, ...d.data() } as Student))
-          .sort((a, b) => (b.createdAt?.seconds ?? 0) - (a.createdAt?.seconds ?? 0));
+          .sort((a, b) => (b.createdAt?.seconds ?? Number.MAX_SAFE_INTEGER) - (a.createdAt?.seconds ?? Number.MAX_SAFE_INTEGER));
         setStudents(list);
         setLoading(false);
       },
@@ -98,6 +150,38 @@ export default function DashboardScreen({ onNavigate }: Props) {
 
     return unsub;
   }, []);
+
+  // Batch-fetch eval types for all students when the list changes
+  useEffect(() => {
+    if (students.length === 0) {
+      setEvalTypesMap({});
+      return;
+    }
+
+    Promise.all(
+      students.map(async (s) => {
+        try {
+          const snap = await getDocs(collection(db, 'students', s.id, 'evaluations'));
+          const seen = new Set<string>();
+          snap.docs.forEach(d => {
+            const data = d.data();
+            if (data.isArchived) return;
+            const label = data.evalType === 'Other' && data.customEvalType
+              ? data.customEvalType
+              : data.evalType;
+            if (label) seen.add(label);
+          });
+          return { id: s.id, label: seen.size > 0 ? [...seen].join(', ') : 'None yet' };
+        } catch {
+          return { id: s.id, label: '—' };
+        }
+      })
+    ).then(results => {
+      const map: Record<string, string> = {};
+      results.forEach(r => { map[r.id] = r.label; });
+      setEvalTypesMap(map);
+    });
+  }, [students]);
 
   const filtered = search.trim()
     ? students.filter(s => {
@@ -113,7 +197,10 @@ export default function DashboardScreen({ onNavigate }: Props) {
     }
     setSaving(true);
     try {
-      await addDoc(collection(db, 'students'), {
+      console.log('=== ADD CASE: starting ===');
+      console.log('Current user UID:', auth.currentUser?.uid);
+      console.log('Form data:', { firstName: form.firstName.trim(), lastName: form.lastName.trim(), studentId: form.studentId.trim() });
+      const ref = await addDoc(collection(db, 'students'), {
         firstName: form.firstName.trim(),
         lastName: form.lastName.trim(),
         studentId: form.studentId.trim(),
@@ -121,10 +208,12 @@ export default function DashboardScreen({ onNavigate }: Props) {
         userId: auth.currentUser!.uid,
         createdAt: serverTimestamp(),
       });
+      console.log('=== ADD CASE: addDoc succeeded, doc id:', ref.id, '===');
       setForm(EMPTY_FORM);
       setModalVisible(false);
-    } catch {
-      Alert.alert('Error', 'Could not add student. Please try again.');
+    } catch (error) {
+      console.error('=== FIRESTORE WRITE ERROR:', error);
+      Alert.alert('Error', String(error));
     } finally {
       setSaving(false);
     }
@@ -132,7 +221,7 @@ export default function DashboardScreen({ onNavigate }: Props) {
 
   const confirmDelete = (student: Student) => {
     Alert.alert(
-      'Remove Student',
+      'Remove Case',
       `Remove ${student.lastName}, ${student.firstName}?`,
       [
         { text: 'Cancel', style: 'cancel' },
@@ -143,7 +232,7 @@ export default function DashboardScreen({ onNavigate }: Props) {
             try {
               await deleteDoc(doc(db, 'students', student.id));
             } catch {
-              Alert.alert('Error', 'Could not remove student.');
+              Alert.alert('Error', 'Could not remove case.');
             }
           },
         },
@@ -152,125 +241,153 @@ export default function DashboardScreen({ onNavigate }: Props) {
   };
 
   const handleSignOut = () => {
-    Alert.alert('Sign Out', 'Are you sure you want to sign out?', [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Sign Out', style: 'destructive', onPress: () => signOut(auth) },
-    ]);
+    Alert.alert(
+      'Sign Out',
+      'Are you sure you want to sign out?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Sign Out',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await signOut(auth);
+            } catch (error) {
+              console.error('Sign out error:', error);
+              Alert.alert('Error', 'Could not sign out. Please try again.');
+            }
+          },
+        },
+      ],
+    );
   };
 
-  const renderStudent = ({ item }: { item: Student }) => (
-    <View style={styles.card}>
-      <View style={styles.cardBody}>
-        <Text style={styles.studentName}>{item.lastName}, {item.firstName}</Text>
-        {item.studentId ? (
-          <Text style={styles.studentIdText}>ID: {item.studentId}</Text>
-        ) : null}
-        <View style={styles.cardMetaRow}>
-          <View style={styles.metaPill}>
-            <Text style={styles.metaPillLabel}>Last Eval</Text>
-            <Text style={styles.metaPillValue}>None</Text>
-          </View>
-          <View style={styles.metaPill}>
-            <Text style={styles.metaPillLabel}>Evals</Text>
-            <Text style={styles.metaPillValue}>0</Text>
-          </View>
-        </View>
-      </View>
-      <TouchableOpacity
-        onPress={() => confirmDelete(item)}
-        style={styles.deleteBtn}
-        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-      >
-        <Text style={styles.deleteBtnText}>×</Text>
-      </TouchableOpacity>
-    </View>
-  );
-
-  return (
-    <SafeAreaView style={styles.safe}>
-      <StatusBar barStyle="dark-content" backgroundColor={PALETTE.bg} />
-
-      {/* Header */}
-      <View style={styles.header}>
-        <View>
-          <Text style={styles.headerTitle}>Students</Text>
-          <Text style={styles.headerSub}>{students.length} enrolled</Text>
-        </View>
-        <TouchableOpacity onPress={handleSignOut} style={styles.signOutBtn}>
-          <Text style={styles.signOutText}>Sign Out</Text>
-        </TouchableOpacity>
-      </View>
-
-      {/* Stats bar */}
-      <View style={styles.statsBar}>
-        <View style={styles.statCell}>
-          <Text style={styles.statValue}>{students.length}</Text>
-          <Text style={styles.statLabel}>Total</Text>
-        </View>
-        <View style={styles.statDivider} />
-        <View style={styles.statCell}>
-          <Text style={styles.statValue}>—</Text>
-          <Text style={styles.statLabel}>Last Eval</Text>
-        </View>
-        <View style={styles.statDivider} />
-        <View style={styles.statCell}>
-          <Text style={styles.statValue}>0</Text>
-          <Text style={styles.statLabel}>This Month</Text>
-        </View>
-      </View>
-
-      {/* Tools */}
-      <View style={styles.toolsWrap}>
-        <Text style={styles.toolsSectionLabel}>Tools</Text>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.toolsRow}>
-          <TouchableOpacity style={styles.toolCard} onPress={() => onNavigate('dueDateCalculator')}>
-            <View style={styles.toolIconWrap}>
-              <Text style={styles.toolIconText}>~</Text>
-            </View>
-            <Text style={styles.toolCardLabel}>Due Date{'\n'}Calculator</Text>
-          </TouchableOpacity>
+  // ── List header component ──────────────────────────────────────────────────
+  const ListHeader = (
+    <>
+      {/* Quick Tools */}
+      <View style={styles.toolsSection}>
+        <Text style={styles.sectionLabel}>Quick Tools</Text>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.toolsRow}
+        >
+          {TOOLS.map(tool => (
+            <TouchableOpacity
+              key={tool.key}
+              style={styles.toolCard}
+              onPress={() => onNavigate(tool.key)}
+              activeOpacity={0.75}
+            >
+              <View style={styles.toolIconWrap}>
+                <Text style={styles.toolIcon}>{tool.icon}</Text>
+              </View>
+              <Text style={styles.toolTitle}>{tool.title}</Text>
+              <Text style={styles.toolDesc}>{tool.desc}</Text>
+            </TouchableOpacity>
+          ))}
         </ScrollView>
+      </View>
+
+      {/* My Cases header */}
+      <View style={styles.casesHeader}>
+        <Text style={styles.casesTitle}>My Cases</Text>
+        <TouchableOpacity style={styles.addCaseBtn} onPress={() => setModalVisible(true)}>
+          <Text style={styles.addCaseBtnText}>+ Add New Case</Text>
+        </TouchableOpacity>
       </View>
 
       {/* Search */}
       <View style={styles.searchWrap}>
         <TextInput
           style={styles.searchInput}
-          placeholder="Search by name or ID..."
+          placeholder="Search by name or ID…"
           placeholderTextColor={PALETTE.placeholder}
           value={search}
           onChangeText={setSearch}
         />
       </View>
 
-      {/* Student list */}
+      {/* Table column headers */}
+      <View style={styles.tableHeader}>
+        <Text style={[styles.colHeader, styles.colName]}>CASE</Text>
+        <Text style={[styles.colHeader, styles.colDate]}>DATE ENTERED</Text>
+        <Text style={[styles.colHeader, styles.colTests]}>TESTS USED</Text>
+        <View style={styles.colDelete} />
+      </View>
+    </>
+  );
+
+  const renderRow = ({ item, index }: { item: Student; index: number }) => (
+    <TouchableOpacity
+      style={[styles.tableRow, index % 2 === 1 && styles.tableRowAlt]}
+      onPress={() => onSelectStudent(item)}
+      activeOpacity={0.6}
+    >
+      <View style={styles.colName}>
+        <Text style={styles.rowName} numberOfLines={1}>
+          {item.lastName}, {item.firstName}
+        </Text>
+        {item.studentId ? (
+          <Text style={styles.rowSubtext}>ID: {item.studentId}</Text>
+        ) : null}
+      </View>
+      <Text style={[styles.rowCell, styles.colDate]} numberOfLines={1}>
+        {formatTimestamp(item.createdAt)}
+      </Text>
+      <Text style={[styles.rowCell, styles.colTests, !evalTypesMap[item.id] && styles.rowCellMuted]} numberOfLines={2}>
+        {evalTypesMap[item.id] ?? '—'}
+      </Text>
+      <TouchableOpacity
+        style={styles.colDelete}
+        onPress={() => confirmDelete(item)}
+        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+      >
+        <Text style={styles.deleteIcon}>×</Text>
+      </TouchableOpacity>
+    </TouchableOpacity>
+  );
+
+  return (
+    <SafeAreaView style={styles.safe}>
+      <StatusBar barStyle="dark-content" backgroundColor={PALETTE.white} />
+
+      {/* Header */}
+      <View style={styles.header}>
+        <Text style={styles.headerTitle}>PsychGraphs</Text>
+        <Text style={styles.headerGreeting}>
+          {firstName ? `Hi, ${firstName}` : ''}
+        </Text>
+        <TouchableOpacity onPress={handleSignOut} style={styles.signOutBtn}>
+          <Text style={styles.signOutText}>Sign Out</Text>
+        </TouchableOpacity>
+      </View>
+
+      {/* Main list */}
       {loading ? (
-        <ActivityIndicator color={PALETTE.accent} style={{ marginTop: 48 }} />
+        <ActivityIndicator color={PALETTE.accent} style={{ marginTop: 60 }} />
       ) : (
         <FlatList
           data={filtered}
           keyExtractor={s => s.id}
-          renderItem={renderStudent}
+          renderItem={renderRow}
+          ListHeaderComponent={ListHeader}
           contentContainerStyle={styles.listContent}
           ListEmptyComponent={
             <View style={styles.emptyWrap}>
               <Text style={styles.emptyText}>
-                {search.trim() ? 'No students match your search.' : 'No students yet.'}
+                {search.trim() ? 'No cases match your search.' : 'No cases yet.'}
               </Text>
               {!search.trim() && (
-                <Text style={styles.emptyHint}>Tap "Add Student" to get started.</Text>
+                <Text style={styles.emptyHint}>Tap "+ Add New Case" to get started.</Text>
               )}
             </View>
           }
         />
       )}
 
-      {/* Add Student FAB */}
-      <TouchableOpacity style={styles.fab} onPress={() => setModalVisible(true)}>
-        <Text style={styles.fabText}>+ Add Student</Text>
-      </TouchableOpacity>
-
-      {/* Add Student bottom sheet */}
+      {/* Add Case bottom sheet */}
       <Modal
         visible={modalVisible}
         transparent
@@ -281,7 +398,7 @@ export default function DashboardScreen({ onNavigate }: Props) {
           <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
             <View style={styles.sheet}>
               <View style={styles.sheetHandle} />
-              <Text style={styles.sheetTitle}>Add Student</Text>
+              <Text style={styles.sheetTitle}>Add New Case</Text>
 
               <View style={styles.row}>
                 <TextInput
@@ -332,7 +449,7 @@ export default function DashboardScreen({ onNavigate }: Props) {
                 >
                   {saving
                     ? <ActivityIndicator color={PALETTE.white} />
-                    : <Text style={styles.saveBtnText}>Add Student</Text>}
+                    : <Text style={styles.saveBtnText}>Add Case</Text>}
                 </TouchableOpacity>
               </View>
             </View>
@@ -348,6 +465,8 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: PALETTE.bg,
   },
+
+  // ── Header ────────────────────────────────────────────────────────────────
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -369,161 +488,219 @@ const styles = StyleSheet.create({
     color: PALETTE.muted,
     marginTop: 2,
   },
+  headerGreeting: {
+    flex: 1,
+    fontSize: 14,
+    color: PALETTE.muted,
+    fontWeight: '500',
+    textAlign: 'center',
+  },
   signOutBtn: {
     paddingHorizontal: 14,
     paddingVertical: 7,
-    borderRadius: 8,
+    borderRadius: 20,
     borderWidth: 1,
-    borderColor: PALETTE.border,
-    backgroundColor: PALETTE.white,
+    borderColor: '#FECACA',
+    backgroundColor: '#FEF2F2',
   },
   signOutText: {
     fontSize: 13,
-    color: PALETTE.muted,
-    fontWeight: '500',
+    color: '#DC2626',
+    fontWeight: '600',
   },
-  statsBar: {
-    flexDirection: 'row',
+
+  // ── Quick Tools ───────────────────────────────────────────────────────────
+  toolsSection: {
+    paddingTop: 20,
+    paddingBottom: 8,
+  },
+  sectionLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: PALETTE.muted,
+    letterSpacing: 0.6,
+    textTransform: 'uppercase',
+    paddingHorizontal: 16,
+    marginBottom: 10,
+  },
+  toolsRow: {
+    paddingHorizontal: 16,
+    gap: 10,
+  },
+  toolCard: {
     backgroundColor: PALETTE.white,
-    marginHorizontal: 16,
-    marginTop: 16,
-    borderRadius: 12,
+    borderRadius: 14,
     borderWidth: 1,
     borderColor: PALETTE.border,
-    paddingVertical: 16,
+    padding: 14,
+    width: 148,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04,
+    shadowRadius: 4,
+    elevation: 1,
   },
-  statCell: {
-    flex: 1,
+  toolIconWrap: {
+    width: 36,
+    height: 36,
+    borderRadius: 9,
+    backgroundColor: PALETTE.accentLight,
     alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 10,
   },
-  statValue: {
-    fontSize: 20,
+  toolIcon: {
+    fontSize: 18,
+  },
+  toolTitle: {
+    fontSize: 13,
     fontWeight: '700',
     color: PALETTE.text,
+    lineHeight: 17,
+    marginBottom: 4,
+    letterSpacing: -0.1,
   },
-  statLabel: {
-    fontSize: 12,
+  toolDesc: {
+    fontSize: 11,
     color: PALETTE.muted,
-    marginTop: 2,
-    fontWeight: '500',
+    lineHeight: 15,
   },
-  statDivider: {
-    width: 1,
-    backgroundColor: PALETTE.border,
-    marginVertical: 4,
+
+  // ── My Cases section ──────────────────────────────────────────────────────
+  casesHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingTop: 24,
+    paddingBottom: 12,
   },
+  casesTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: PALETTE.text,
+    letterSpacing: -0.2,
+  },
+  addCaseBtn: {
+    backgroundColor: PALETTE.accent,
+    borderRadius: 20,
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+  },
+  addCaseBtnText: {
+    color: PALETTE.white,
+    fontSize: 13,
+    fontWeight: '600',
+  },
+
+  // ── Search ────────────────────────────────────────────────────────────────
   searchWrap: {
     paddingHorizontal: 16,
-    paddingTop: 16,
-    paddingBottom: 4,
+    paddingBottom: 12,
   },
   searchInput: {
     backgroundColor: PALETTE.white,
     borderRadius: 10,
     borderWidth: 1,
     borderColor: PALETTE.border,
-    padding: 13,
-    fontSize: 15,
+    paddingHorizontal: 14,
+    paddingVertical: 11,
+    fontSize: 14,
     color: PALETTE.text,
   },
-  listContent: {
+
+  // ── Table ─────────────────────────────────────────────────────────────────
+  tableHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
     paddingHorizontal: 16,
-    paddingTop: 12,
-    paddingBottom: 100,
-  },
-  card: {
-    backgroundColor: PALETTE.white,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: PALETTE.border,
-    marginBottom: 10,
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 16,
-  },
-  cardBody: {
-    flex: 1,
-  },
-  studentName: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: PALETTE.text,
-    marginBottom: 2,
-  },
-  studentIdText: {
-    fontSize: 13,
-    color: PALETTE.muted,
-    marginBottom: 8,
-  },
-  cardMetaRow: {
-    flexDirection: 'row',
-    gap: 8,
-    marginTop: 6,
-  },
-  metaPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    paddingVertical: 8,
     backgroundColor: PALETTE.bg,
-    borderRadius: 6,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderWidth: 1,
-    borderColor: PALETTE.border,
-    gap: 4,
+    borderTopWidth: 1,
+    borderTopColor: PALETTE.border,
+    borderBottomWidth: 1,
+    borderBottomColor: PALETTE.border,
   },
-  metaPillLabel: {
+  colHeader: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: PALETTE.placeholder,
+    letterSpacing: 0.5,
+  },
+  tableRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 13,
+    backgroundColor: PALETTE.white,
+    borderBottomWidth: 1,
+    borderBottomColor: PALETTE.border,
+  },
+  tableRowAlt: {
+    backgroundColor: PALETTE.rowAlt,
+  },
+  colName: {
+    flex: 2,
+    paddingRight: 8,
+  },
+  colDate: {
+    flex: 1.3,
+    paddingRight: 8,
+  },
+  colTests: {
+    flex: 1.6,
+    paddingRight: 4,
+  },
+  colDelete: {
+    width: 28,
+    alignItems: 'center',
+  },
+  rowName: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: PALETTE.text,
+  },
+  rowSubtext: {
     fontSize: 11,
     color: PALETTE.muted,
-    fontWeight: '500',
+    marginTop: 1,
   },
-  metaPillValue: {
-    fontSize: 11,
-    color: PALETTE.text,
-    fontWeight: '600',
+  rowCell: {
+    fontSize: 12,
+    color: PALETTE.muted,
   },
-  deleteBtn: {
-    padding: 8,
-    marginLeft: 8,
-  },
-  deleteBtnText: {
-    fontSize: 22,
+  rowCellMuted: {
     color: PALETTE.placeholder,
-    lineHeight: 24,
+  },
+  deleteIcon: {
+    fontSize: 20,
+    color: PALETTE.placeholder,
+    lineHeight: 22,
+  },
+
+  // ── List chrome ───────────────────────────────────────────────────────────
+  listContent: {
+    paddingBottom: 40,
   },
   emptyWrap: {
     alignItems: 'center',
-    paddingTop: 60,
+    paddingTop: 48,
+    paddingHorizontal: 32,
   },
   emptyText: {
     fontSize: 15,
     color: PALETTE.muted,
     fontWeight: '500',
+    textAlign: 'center',
   },
   emptyHint: {
     fontSize: 13,
     color: PALETTE.placeholder,
     marginTop: 6,
+    textAlign: 'center',
   },
-  fab: {
-    position: 'absolute',
-    bottom: 28,
-    right: 20,
-    left: 20,
-    backgroundColor: PALETTE.accent,
-    borderRadius: 12,
-    paddingVertical: 16,
-    alignItems: 'center',
-    shadowColor: PALETTE.accent,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 6,
-  },
-  fabText: {
-    color: PALETTE.white,
-    fontSize: 16,
-    fontWeight: '600',
-  },
+
+  // ── Bottom sheet ──────────────────────────────────────────────────────────
   sheetBackdrop: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.35)',
@@ -601,52 +778,5 @@ const styles = StyleSheet.create({
     color: PALETTE.white,
     fontSize: 15,
     fontWeight: '600',
-  },
-  // Tools section
-  toolsWrap: {
-    paddingTop: 16,
-    paddingBottom: 4,
-  },
-  toolsSectionLabel: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: PALETTE.muted,
-    letterSpacing: 0.2,
-    paddingHorizontal: 16,
-    marginBottom: 8,
-  },
-  toolsRow: {
-    paddingHorizontal: 16,
-    gap: 12,
-  },
-  toolCard: {
-    backgroundColor: PALETTE.white,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: PALETTE.border,
-    padding: 14,
-    alignItems: 'center',
-    width: 100,
-  },
-  toolIconWrap: {
-    width: 40,
-    height: 40,
-    borderRadius: 10,
-    backgroundColor: PALETTE.accentLight,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 8,
-  },
-  toolIconText: {
-    fontSize: 20,
-    color: PALETTE.accent,
-    fontWeight: '700',
-  },
-  toolCardLabel: {
-    fontSize: 11,
-    color: PALETTE.text,
-    fontWeight: '600',
-    textAlign: 'center',
-    lineHeight: 15,
   },
 });
